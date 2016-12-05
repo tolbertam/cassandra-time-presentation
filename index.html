@@ -4,7 +4,7 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-		<title>Last Write Wins</title>
+		<title>_title_goes_here_</title>
 
 		<link rel="stylesheet" href="css/reveal.css">
 		<link rel="stylesheet" href="css/theme/night.css">
@@ -25,7 +25,7 @@
 		<div class="reveal">
 			<div class="slides">
 				<section>
-					<h1>Last Write Wins</h1>
+					<h1>_title_goes_here_</h1>
 					<i>How time factors into how Apache Cassandra resolves changes and how to deal with it.</i>
 					<div class="footer">Andy Tolbert</div>
 				</section>
@@ -208,7 +208,7 @@ public long getTimestamp()
 				<section>
 					<h3>Time synchronization between C* nodes</h3>
 					<ul>
-						<li>Previously discussed timestamp montonicity is at <em>node</em> level.</li>
+						<li>Previously discussed timestamp monotonicity is at <em>node</em> level.</li>
 						<li>Therefore it is very important that time is synchronized between nodes in your C* cluster.</li>
 					</ul>
 				</section>
@@ -226,7 +226,7 @@ public long getTimestamp()
 				<section>
 					<h3>Client Timestamps</h3>
 					<ul>
-						<li>As discussed, server timestamps have a variety of issues, mainly that you can't easily guarantee that operations are linearizable.</li>
+						<li>As discussed, server timestamps have a variety of issues, mainly that you can't guarantee that operations are linearizable.</li>
 						<li class="fragment">Client timestamps offer a mechanism to ensure this for a single client.</li>
 					</ul>
 				</section>
