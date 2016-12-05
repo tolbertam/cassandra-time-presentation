@@ -47,6 +47,14 @@ body {
   background-color: #fff;
   color: #000; }
 
+.reveal .footer {
+    /*position: fixed;*/
+    bottom: 0;
+    width: 100%;
+    text-align: right;
+    font-size: 0.5em;
+}
+
 /*********************************************
  * VIEW FRAGMENTS
  *********************************************/

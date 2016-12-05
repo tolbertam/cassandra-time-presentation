@@ -4,10 +4,10 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-		<title>reveal.js</title>
+		<title>Last Write Wins</title>
 
 		<link rel="stylesheet" href="css/reveal.css">
-		<link rel="stylesheet" href="css/theme/black.css">
+		<link rel="stylesheet" href="css/theme/night.css">
 
 		<!-- Theme used for syntax highlighting of code -->
 		<link rel="stylesheet" href="lib/css/zenburn.css">
@@ -24,11 +24,241 @@
 	<body>
 		<div class="reveal">
 			<div class="slides">
-				<section>Slide 1</section>
-				<section>Slide 2</section>
+				<section>
+					<h1>Last Write Wins</h1>
+					<i>How time factors into how Apache Cassandra resolves changes and how to deal with it.</i>
+					<div class="footer">Andy Tolbert</div>
+				</section>
+				<section>
+					<h3>Resolving Conflicts in Distributed Systems</h3>
+					<p>Many updates can be made concurrently and processed by different servers.</p>
+					<p>Approaches to resolving conflicting changes:</p>
+					<ul>
+						<li>Vector Clocks</li>
+						<li>Timestamps, aka 'Last Write Wins'</li>
+					</ul>
+					<p/>
+					<div class="footer">More Reading: <a href="http://www.datastax.com/dev/blog/why-cassandra-doesnt-need-vector-clocks">Why Cassandra doesn't need Vector Clocks</a></div>
+				</section>
+				<section>
+					<h3>Mutations</h3>
+					<ul>
+						<li>Whenever you mutate data (INSERT, UPDATE, DELETE) in C*, a cell or tombstone is created</li>
+						<li class="fragment">Each cell/tombstone contains a timestamp representing when the operation happened</li>
+						<li class="fragment">The timestamp is used to determine which data is current</li>
+					</ul>
+				</section>
+				<section>
+					<h3>How Cassandra resolves the 'right' data</h3>
+					<p>For a given column:</p>
+					<ol>
+						<li class="fragment">Data with the latest timestamp</li>
+						<li class="fragment">If same timestamp: deletes over updates</li>
+						<li class="fragment">If same timestamp: lexically larger value</li>
+					</ol>
+					<p/>
+					<div class="footer">Source: <a href="http://cassandra.apache.org/doc/latest/faq/index.html#what-happens-if-two-updates-are-made-with-the-same-timestamp">Cassandra FAQ</a></div>
+				</section>
+				<section>
+					<section>
+						<h3>Example 0</h3>
+						<pre><code class="sql" data-trim>CREATE TABLE IF NOT EXISTS u (
+  k text PRIMARY KEY,
+  v0 int,
+  v1 int
+);
+
+INSERT INTO u (k, v0) VALUES ('example0', 9) USING TIMESTAMP 1;
+INSERT INTO u (k, v0) VALUES ('example0', 8) USING TIMESTAMP 2;
+
+SELECT v0 FROM u where k='example0';
+// ???</code></pre>
+						<pre class="fragment" data-trim><code class="sql">SELECT v0 FROM u where k='example0';
+
+ v0
+----
+  8</code></pre>
+					</section>
+					<section>
+						<h3>Example 1</h3>
+						<pre><code class="sql" data-trim>create table if not exists u (
+  k text primary key,
+  v0 int,
+  v1 int
+);
+
+insert into u (k, v0) values ('example1', 9) using timestamp 1;
+insert into u (k, v0) values ('example1', 8) using timestamp 1;
+
+select v0 from u where k='example1';
+// ???</code></pre>
+						<pre class="fragment" data-trim><code class="sql">select v0 from u where k='example1';
+
+ v0
+----
+  9</code></pre>
+					</section>
+					<section>
+						<h3>Example 2</h3>
+						<pre><code class="sql" data-trim>create table if not exists u (
+  k text primary key,
+  v0 int,
+  v1 int
+);
+
+delete from u using timestamp 1 where k='example2';
+insert into u (k, v0) values ('example2', 8) using timestamp 1;
+
+select v0 from u where k='example2';
+// ???</code></pre>
+						<pre class="fragment" data-trim><code class="sql">select v0 from u where k='example2';
+
+ v0
+----
+
+(0 rows)</code></pre>
+					</section>
+					<section>
+						<h3>Example 3</h3>
+						<pre><code class="sql" data-trim>CREATE TABLE IF NOT EXISTS u (
+  k text PRIMARY KEY,
+  v0 int,
+  v1 int
+);
+
+INSERT INTO u (k, v0, v1) VALUES ('example3', 8, 9) USING TIMESTAMP 1;
+INSERT INTO u (k, v0, v1) VALUES ('example3', 9, 8) USING TIMESTAMP 1;
+
+SELECT v0,v1 FROM u where k='example3';
+// ???</code></pre>
+						<pre class="fragment" data-trim><code class="sql">SELECT v0,v1 FROM u where k='example3';
+
+v0 | v1
+---+----
+ 9 |  9</code></pre>
+					</section>
+					<section>
+						<h3>Example 4</h3>
+						<pre><code class="sql" data-trim>CREATE TABLE IF NOT EXISTS u (
+  k text PRIMARY KEY,
+  v0 int,
+  v1 int
+);
+
+INSERT INTO u (k, v0) VALUES ('example4', 9);
+INSERT INTO u (k, v0) VALUES ('example4', 8);
+
+SELECT v0 FROM u where k='example4';
+// ???</code></pre>
+						<pre class="fragment" data-trim><code class="sql">SELECT v0 FROM u where k='example4';
+
+ v0
+----
+  8
+
+- OR -
+
+ v0
+----
+  9 
+						</code></pre>
+					</section>
+				</section>
+				<section>
+					<h3>How timestamps are generated in C*</h3>
+					<p>If timestamp isn't provided in request:</p>
+					<ul>
+						<li>Uses system clock (System.currentTimeMillis())</li>
+						<li>Maintains a reference to last timestamp to ensure next value is greater (Monotonicity)</li>
+					</ul>
+					<pre class="fragment"><a href="https://github.com/apache/cassandra/blob/cassandra-3.9/src/java/org/apache/cassandra/service/ClientState.java">src/java/org/apache/cassandra/service/ClientState.java</a><code class="java" data-trim>private static final AtomicLong lastTimestampMicros = 
+  new AtomicLong(0);
+
+public long getTimestamp()
+{
+  while (true)
+  {
+    long current = System.currentTimeMillis() * 1000;
+    long last = lastTimestampMicros.get();
+    long tstamp = last &gt;= current ? last + 1 : current;
+    if (lastTimestampMicros.compareAndSet(last, tstamp))
+      return tstamp;
+  }
+}</code></pre>
+				</section>
+				<section>
+					<h3>What this buys you</h3>
+					<p>For a single node cluster...</p>
+					<ul>
+						<li>All mutations will be written with a timestamp greater than previous writes...</li>
+						<li class="fragment">Until the host/C* process is restarted.
+							<pre><code class="bash" data-trim>* Clock is at t100
+- t100: User inserts C=0, t100 assigned to write
+- t105: User updates C=5, t105 assigned
+- t105: User updates C=6, t106 assigned
+* Clock is set to t050
+- t050: User updates C=7, t107 assigned
+* Cassandra is restarted
+- t060: User updates C=8, t060 assigned
+- t100: User retrieves C, C=7 is returned</code></pre>
+						</li>
+						<li class="fragment">This is probably not a big deal unless the clock is set back minutes+ into the future</li>
+					</ul>
+				</section>
+				<section>
+					<h3>Time synchronization between C* nodes</h3>
+					<ul>
+						<li>Previously discussed timestamp montonicity is at <em>node</em> level.</li>
+						<li>Therefore it is very important that time is synchronized between nodes in your C* cluster.</li>
+					</ul>
+				</section>
+				<section>
+					<h3>Time synchronization between C* nodes (cont'd)</h3>
+					<ul>
+						<li class="fragment">Use NTP</li>
+						<li class="fragment">Monitor that NTP service is running on each server</li>
+						<li class="fragment">Monitor for time drifts/that clocks are in sync within network latency.</li>
+						<li class="fragment">Monitor <i>ColUpdateTimeDeltaHistogram</i> (<a href="https://issues.apache.org/jira/browse/CASSANDRA-7979">CASSANDRA-7979</a>) to check delta distribution between updates on a column in a memtable.</li>
+					</ul>
+					<p/>
+					<div class="footer"><a href="https://www.youtube.com/watch?v=IjsJLTriLzs&t=7m5s">Clock Skew and Distributed Systems Talk</a></div>
+				</section>
+				<section>
+					<h3>Client Timestamps</h3>
+					<ul>
+						<li>As discussed, server timestamps have a variety of issues, mainly that you can't easily guarantee that operations are linearizable.</li>
+						<li class="fragment">Client timestamps offer a mechanism to ensure this for a single client.</li>
+					</ul>
+				</section>
+				<section>
+					<h3>Using Client Timestamps</h3>
+					<ul>
+						<li><b>CQL</b>: Add USING TIMESTAMP X to statement</li>
+						<li><b>Driver Client</b>: Use Statement.setTimestamp(x) (C* 2.1+)</li>
+						<li><b>Driver Client</b>: Use a Timestamp Generator (C* 2.1+)</li>
+						<li>Client Timestamps with a Monotonic Generator are the default in most drivers.</li>
+					</ul>
+				</section>
+				<section>
+					<h3>When Client Timestamps are not enough</h3>
+					<ul>
+						<li>If you have more than 1 client writing to same column(s), same issue as multiple C* nodes.</li>
+						<li class="fragment">Therefore, make sure clients are NTP synched as well</li>
+						<li class="fragment">Use lightweight transactions if you need stronger guarantees</li>
+					</ul>
+				</section>
+				<section>
+					<h3>Further Reading:</h3>
+					<ul>
+						<li><a href="http://s3.amazonaws.com/AllThingsDistributed/sosp/amazon-dynamo-sosp2007.pdf">Dynamo Paper</a></li>
+						<li><a href="http://www.datastax.com/dev/blog/why-cassandra-doesnt-need-vector-clocks">Why Cassandra doesn't need Vector Clocks</a></li>
+						<li><a href="https://www.youtube.com/watch?v=IjsJLTriLzs&t=7m5s">Clock Skew and Distributed Systems Talk</a></li>
+						<li><a href="http://docs.datastax.com/en/developer/java-driver/3.1/manual/query_timestamps/">Query Timestamps w/ the Java Driver</a></li>
+						<li><a href="https://aphyr.com/posts/294-jepsen-cassandra">Jepsen: Cassandra</a></li>
+					</ul>
+				</section>
 			</div>
 		</div>
-
 		<script src="lib/js/head.min.js"></script>
 		<script src="js/reveal.js"></script>
 
@@ -36,6 +266,7 @@
 			// More info https://github.com/hakimel/reveal.js#configuration
 			Reveal.initialize({
 				history: true,
+				slideNumber: true,
 
 				// More info https://github.com/hakimel/reveal.js#dependencies
 				dependencies: [
